@@ -1,13 +1,11 @@
 package me.voidxwalker.autoreset.mixin.hotkey;
 
 import me.voidxwalker.autoreset.Atum;
-import net.minecraft.client.Keyboard;
-import net.minecraft.client.MinecraftClient;
-import org.spongepowered.asm.mixin.Final;
-import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
+import net.minecraft.client.*;
+import net.minecraft.client.gui.screen.option.KeybindsScreen;
+import org.lwjgl.glfw.GLFW;
+import org.spongepowered.asm.mixin.*;
+import org.spongepowered.asm.mixin.injection.*;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Keyboard.class)
@@ -16,20 +14,10 @@ public abstract class KeyboardMixin {
     @Final
     private MinecraftClient client;
 
-    // injecting at Keyboard#debugCrashStartTime ensures the window handle check has succeeded
-    @Inject(
-            method = "onKey",
-            at = @At(
-                    value = "FIELD",
-                    target = "Lnet/minecraft/client/Keyboard;debugCrashStartTime:J",
-                    ordinal = 0
-            ),
-            cancellable = true
-    )
-    private void onKey(long window, int key, int scancode, int action, int j, CallbackInfo ci) {
-        // 1 is GLFW for "clicked" (0 -> "released", 2 -> "held down")
-        if (action == 1 && Atum.resetKey.matchesKey(key, scancode)) {
-            if (!Atum.canReset(client)) {
+    @Inject(method = "onKey", at = @At(value = "FIELD", target = "Lnet/minecraft/client/Keyboard;debugCrashStartTime:J", ordinal = 0), cancellable = true)
+    private void atum_onKey(long window, int key, int scancode, int action, int mods, CallbackInfo ci) {
+        if (action == GLFW.GLFW_PRESS && Atum.resetKey.matchesKey(key, scancode)) {
+            if (this.client.currentScreen instanceof KeybindsScreen && ((KeybindsScreen) this.client.currentScreen).selectedKeyBinding == Atum.resetKey) {
                 return;
             }
             Atum.scheduleReset();
