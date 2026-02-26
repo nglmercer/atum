@@ -1,71 +1,55 @@
 plugins {
-    id "fabric-loom" version "$loom_version"
-    id 'maven-publish'
+	alias libs.plugins.fabric.loom
+	id "maven-publish"
 }
 
 version = "$mod_version+$target_version"
+group = maven_group
 
 base {
-    archivesName = archives_name
-}
-
-repositories {
-    maven { url "https://jitpack.io" }
-    flatDir { dirs "libs" }
+	archivesName = archives_name
 }
 
 loom {
-    accessWidenerPath = file("src/main/resources/atum.accesswidener")
+	decompilers {
+		vineflower {
+			options.putAll(["mark-corresponding-synthetics": "1", "indent-string": "    "])
+		}
+	}
+	mixin {
+		useLegacyMixinAp = false
+	}
 }
 
 dependencies {
-    minecraft "com.mojang:minecraft:$minecraft_version"
-    mappings "dev.tildejustin:yarn:${minecraft_version}-build.$yarn_build:v2"
-    modImplementation "net.fabricmc:fabric-loader:$loader_version"
-
-    // check for the latest versions at https://jitpack.io/#contariaa/speedrunapi
-    modImplementation "com.github.contariaa:SpeedrunAPI:v2.1-1.16.1"
+	minecraft libs.minecraft
+	mappings variantOf(libs.yarn.mappings) { classifier "v2" }
+	modImplementation libs.fabric.loader
+	vineflowerDecompilerClasspath libs.vineflower
 }
 
 processResources {
-    inputs.property "version", version
-
-    filesMatching("fabric.mod.json") {
-        expand "version": version
-    }
+	filesMatching "fabric.mod.json", {
+		expand "version": version
+	}
 }
 
 tasks.withType(JavaCompile).configureEach {
-    it.options.encoding = "UTF-8"
-    it.options.release.set(8)
+	it.options.encoding = "UTF-8"
+	it.options.release.set(21)
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_1_8
-    targetCompatibility = JavaVersion.VERSION_1_8
-
-    withSourcesJar()
+	sourceCompatibility = targetCompatibility = JavaVersion.VERSION_21
+	withSourcesJar()
 }
-
 jar {
-    from("LICENSE") {
-        rename { "${it}_${base.archivesName.get()}" }
-    }
+	from "LICENSE"
 }
 
-// configure the maven publication
 publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            from components.java
-        }
-    }
-
-    // See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
-    repositories {
-        // Add repositories to publish to here.
-        // Notice: This block does NOT have the same function as the block in the top level.
-        // The repositories here will be used for publishing your artifact, not for
-        // retrieving dependencies.
-    }
+	publications.create("mavenJava", MavenPublication) {
+		from components.java
+	}
+	repositories {}
 }

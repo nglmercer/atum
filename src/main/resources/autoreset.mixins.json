@@ -2,26 +2,26 @@
   "required": true,
   "minVersion": "0.8",
   "package": "me.voidxwalker.autoreset.mixin",
-  "compatibilityLevel": "JAVA_8",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "CreateWorldScreenMixin",
+    "DeathScreenMixin",
+    "DebugHudMixin",
+    "OptionsScreenMixin",
+    "TitleScreenMixin",
+    "hotkey.GameOptionsMixin",
+    "hotkey.KeyBindingAccessor",
+    "hotkey.KeyboardMixin",
+    "hotkey.MinecraftClientMixin"
+  ],
+  "client": [
+    "LevelLoadingScreenMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   },
-  "client": [
-    "GeneratorOptionsMixin",
-    "MinecraftClientMixin",
-    "access.CreateWorldScreen$ModeAccessor",
-    "access.CreativeInventoryScreenAccessor",
-    "access.GeneratorTypeAccessor",
-    "access.RecipeBookWidgetAccessor",
-    "access.RuleAccessor",
-    "config.CreateWorldScreenMixin",
-    "config.MoreOptionsDialogMixin",
-    "gui.DeathScreenMixin",
-    "gui.DebugHudMixin",
-    "gui.LevelLoadingScreenMixin",
-    "gui.OptionsScreenMixin",
-    "gui.TitleScreenMixin",
-    "hotkey.KeyboardMixin",
-    "hotkey.MouseMixin"
-  ]
+  "overwrites": {
+    "conformVisibility": true,
+    "requireAnnotations": true
+  }
 }

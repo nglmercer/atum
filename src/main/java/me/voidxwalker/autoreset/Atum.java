@@ -1,13 +1,8 @@
 package me.voidxwalker.autoreset;
 
-import io.netty.util.internal.ConcurrentSet;
-import me.voidxwalker.autoreset.api.seedprovider.AtumWaitingScreen;
-import me.voidxwalker.autoreset.api.seedprovider.SeedProvider;
 import me.voidxwalker.autoreset.mixin.access.CreativeInventoryScreenAccessor;
 import me.voidxwalker.autoreset.mixin.access.RecipeBookWidgetAccessor;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.Element;
 import net.minecraft.client.gui.ParentElement;
@@ -15,61 +10,46 @@ import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.BookEditScreen;
 import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
 import net.minecraft.client.gui.screen.ingame.SignEditScreen;
-import net.minecraft.client.gui.screen.options.ControlsOptionsScreen;
+import net.minecraft.client.gui.screen.option.ControlsOptionsScreen;
 import net.minecraft.client.gui.screen.recipebook.RecipeBookWidget;
+import net.minecraft.client.gui.screen.world.CreateWorldScreen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.client.options.KeyBinding;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
+import net.minecraft.text.Text;
+import net.minecraft.util.Language;
+import org.apache.logging.log4j.*;
+import org.jetbrains.annotations.*;
 import org.lwjgl.glfw.GLFW;
 
-import java.util.ArrayList;
-import java.util.Objects;
-import java.util.Queue;
-import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.io.*;
+import java.util.*;
 
 public class Atum implements ClientModInitializer {
-    public static final Logger LOGGER = LogManager.getLogger();
+    public static boolean isRunning = false;
+    public static Logger LOGGER = LogManager.getLogger();
 
-    public static final boolean HAS_WORLDPREVIEW = FabricLoader.getInstance().isModLoaded("worldpreview");
-
-    public static AtumConfig config;
+    public static String seed = "";
+    public static int difficulty = 1;
+    public static int generatorType = 0;
+    public static int rsgAttempts;
+    public static int ssgAttempts;
+    public static boolean structures = true;
+    public static boolean bonusChest = false;
     public static KeyBinding resetKey;
-
-    private static boolean running = false;
-    private static boolean shouldReset;
-
-    public static final Queue<Throwable> SEED_FAILURES = new ConcurrentLinkedQueue<>();
-    public static final Set<CompletableFuture<String>> SEED_FUTURES = new ConcurrentSet<>();
-    private static final SeedProvider DEFAULT_SEED_PROVIDER = () -> CompletableFuture.completedFuture(Atum.config.seed);
-    private static SeedProvider seedProvider = DEFAULT_SEED_PROVIDER;
-
-    public static void createNewWorld() {
-        running = true;
-        shouldReset = false;
-
-        MinecraftClient.getInstance().openScreen(new AtumCreateWorldScreen(null));
-    }
-
-    public static boolean isRunning() {
-        return running;
-    }
-
-    public static void stopRunning() {
-        shouldReset = false;
-        running = false;
-        if (config != null) {
-            config.dataPackMismatch = false;
-        }
-        cancelAllSeeds();
-    }
+    public static boolean shouldReset = false;
+    static Map<String, String> extraProperties = new LinkedHashMap<>();
+    static File configFile;
 
     public static void scheduleReset() {
-        if (!(MinecraftClient.getInstance().currentScreen instanceof AtumWaitingScreen)) {
-            shouldReset = true;
-        }
+        shouldReset = true;
+    }
+
+    public static void createNewWorld() {
+        isRunning = true;
+        shouldReset = false;
+
+        CreateWorldScreen.create(MinecraftClient.getInstance(), null);
     }
 
     public static boolean isResetScheduled() {
@@ -77,67 +57,11 @@ public class Atum implements ClientModInitializer {
     }
 
     public static boolean shouldReset() {
-        return isResetScheduled() && !isBlocking();
+        return isResetScheduled() && !isBlocking() && canReset(MinecraftClient.getInstance());
     }
 
     public static boolean isBlocking() {
-        MinecraftClient client = MinecraftClient.getInstance();
-        return client.getOverlay() != null || isLoadingWorld() || client.currentScreen instanceof AtumWaitingScreen;
-    }
-
-    public static boolean isInWorld() {
-        return MinecraftClient.getInstance().world != null;
-    }
-
-    public static boolean isLoadingWorld() {
-        return MinecraftClient.getInstance().getServer() != null && MinecraftClient.getInstance().world == null;
-    }
-
-    public static boolean inDemoMode() {
-        return isRunning() && config.demoMode;
-    }
-
-    /**
-     * Returns true if the seed is set by Atum and no external seed provider is used, used by chunkcacher.
-     */
-    @SuppressWarnings("unused")
-    public static boolean isSetSeed() {
-        return Atum.seedProvider == DEFAULT_SEED_PROVIDER && (config.isSetSeed() || config.demoMode);
-    }
-
-    public static SeedProvider getSeedProvider() {
-        return seedProvider;
-    }
-
-    @SuppressWarnings("unused")
-    public static void setSeedProvider(SeedProvider seedProvider) {
-        Atum.ensureState(Atum.seedProvider == DEFAULT_SEED_PROVIDER, "Seed provider has already been changed! It is likely that multiple mods are trying to set the seed provider!");
-        Atum.ensureState(!Atum.isRunning(), "Seed provider set at an illegal time!");
-        Atum.seedProvider = Objects.requireNonNull(seedProvider);
-    }
-
-    public static void ensureState(boolean condition, String exceptionMessage) throws IllegalStateException {
-        if (!condition) throw new IllegalStateException(exceptionMessage);
-    }
-
-    public static void cancelAllSeeds() {
-        // Copy the collection to avoid modification during iteration
-        new ArrayList<>(SEED_FUTURES).forEach(f -> f.cancel(true));
-    }
-
-    public static void checkSeedFailures() {
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (!SEED_FAILURES.isEmpty()) {
-            if (isRunning()) {
-                stopRunning();
-                if (client.world == null) {
-                    client.openScreen(null);
-                }
-            }
-            while (!SEED_FAILURES.isEmpty()) {
-                getSeedProvider().onFail(SEED_FAILURES.poll());
-            }
-        }
+        return MinecraftClient.getInstance().getOverlay() != null || isLoadingWorld();
     }
 
     @SuppressWarnings({"BooleanMethodIsAlwaysInverted", "RedundantIfStatement"})
@@ -146,12 +70,7 @@ public class Atum implements ClientModInitializer {
         if (curr == null) {
             return true;
         }
-        if (curr instanceof ControlsOptionsScreen && ((ControlsOptionsScreen) curr).focusedBinding == Atum.resetKey) {
-            return false;
-        }
-        if (!Atum.config.safeHotkey) {
-            return true;
-        }
+
         Element focused = curr.getFocused();
         while (focused instanceof ParentElement) {
             focused = ((ParentElement) focused).getFocused();
@@ -171,12 +90,172 @@ public class Atum implements ClientModInitializer {
         return true;
     }
 
+    public static boolean isLoadingWorld() {
+        return MinecraftClient.getInstance().getServer() != null && MinecraftClient.getInstance().world == null;
+    }
+
+    public static void log(Level level, String message) {
+        LOGGER.log(level, message);
+    }
+
+    public static Text getTranslation(String path, String text) {
+        if (Language.getInstance().get(path).equals(path)) {
+            return Text.literal(text);
+        } else {
+            return Text.translatable(path);
+        }
+    }
+
     @Override
     public void onInitializeClient() {
+        log(Level.INFO, "Initializing");
         resetKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "Create New World",
+                getTranslation("key.atum.reset", "Create New World").getString(),
+                InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_F6,
-                "key.categories.atum"
+                getTranslation("key.categories.atum", "Atum").getString()
         ));
+        new File("config").mkdir();
+        new File("config/atum").mkdir();
+        configFile = new File("config/atum/atum.properties");
+
+        if (!configFile.exists()) {
+            try {
+                configFile.createNewFile();
+                saveProperties();
+            } catch (IOException e) {
+                log(Level.ERROR, "Could not create config file:\n" + e.getMessage());
+            }
+            File difficultyFile = new File("ardifficulty.txt");
+            if (difficultyFile.exists()) {
+                String difInput = load(difficultyFile);
+                difficulty = difInput == null ? 1 : Integer.parseInt(difInput.trim());
+                if (difficulty > 4) {
+                    difficulty = 1;
+                }
+                difficultyFile.delete();
+            }
+            File seedFile = new File("seed.txt");
+            if (seedFile.exists()) {
+                seed = load(seedFile);
+                seed = seed == null ? "" : seed;
+                seedFile.delete();
+            }
+            File attemptsFile = new File("attempts.txt");
+            if (attemptsFile.exists()) {
+                String s = load(attemptsFile);
+                if (s != null) {
+                    try {
+                        rsgAttempts = Integer.parseInt(s);
+                    } catch (NumberFormatException e) {
+                        rsgAttempts = 0;
+                    }
+                }
+                attemptsFile.delete();
+            }
+        } else {
+            loadFromProperties(getProperties(configFile));
+        }
+    }
+
+    public static String load(File file) {
+        try (Scanner scanner = new Scanner(file)) {
+            if (scanner.hasNext()) {
+                return scanner.nextLine();
+            } else {
+                return null;
+            }
+        } catch (FileNotFoundException e) {
+            log(Level.ERROR, "Could not load:\n" + e.getMessage());
+            return null;
+        }
+    }
+
+    static Properties getProperties(File configFile) {
+        try (FileInputStream f = new FileInputStream(configFile)) {
+            Properties properties = new Properties();
+            properties.load(f);
+            return properties;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    public static void saveProperties() throws IOException {
+        try (FileWriter f = new FileWriter(configFile)) {
+            Properties properties = getProperties();
+            properties.putAll(extraProperties);
+            properties.store(f, "This is the config file for Atum.\nseed: leave empty for a random seed\ndifficulty: -1 = HARDCORE, 0 = PEACEFUL, 1 = EASY, 2= NORMAL, 3= HARD \ngeneratorType: 0 = DEFAULT, 1= FLAT, 2= LARGE_BIOMES, 3 = AMPLIFIED, 4 = SINGLE_BIOME_SURFACE, 5 = SINGLE_BIOME_CAVES, 6 =SINGLE_BIOME_FLOATING_ISLANDS");
+        } catch (IOException e) {
+            log(Level.WARN, "Could not save config file:\n" + e.getMessage());
+        }
+    }
+
+    @NotNull
+    private static Properties getProperties() {
+        Properties properties = new Properties();
+        properties.put("rsgAttempts", String.valueOf(rsgAttempts));
+        properties.put("ssgAttempts", String.valueOf(ssgAttempts));
+        properties.put("seed", seed);
+        properties.put("difficulty", String.valueOf(difficulty));
+        properties.put("generatorType", String.valueOf(generatorType));
+        properties.put("structures", String.valueOf(structures));
+        properties.put("bonusChest", String.valueOf(bonusChest));
+        return properties;
+    }
+
+    static void loadFromProperties(Properties properties) {
+        if (properties != null) {
+            for (Map.Entry<Object, Object> entry : properties.entrySet()) {
+                if (!entry.getKey().equals("seed") && !entry.getKey().equals("difficulty") && !entry.getKey().equals("generatorType") && !entry.getKey().equals("rsgAttempts") && !entry.getKey().equals("ssgAttempts") && !entry.getKey().equals("structures") && !entry.getKey().equals("bonusChest")) {
+                    extraProperties.put((String) entry.getKey(), (String) entry.getValue());
+                }
+            }
+            seed = !properties.containsKey("seed") ? "" : properties.getProperty("seed");
+            if (seed == null) {
+                seed = "";
+            }
+            seed = seed.trim();
+            try {
+                difficulty = !properties.containsKey("difficulty") ? 1 : Integer.parseInt(properties.getProperty("difficulty"));
+            } catch (NumberFormatException e) {
+                difficulty = 1;
+            }
+            if (difficulty > 4) {
+                difficulty = 1;
+            }
+            try {
+                generatorType = !properties.containsKey("generatorType") ? 0 : Integer.parseInt(properties.getProperty("generatorType"));
+            } catch (NumberFormatException e) {
+                generatorType = 0;
+            }
+            if (generatorType > 5) {
+                generatorType = 0;
+            }
+            try {
+                rsgAttempts = !properties.containsKey("rsgAttempts") ? 0 : Integer.parseInt(properties.getProperty("rsgAttempts"));
+            } catch (NumberFormatException e) {
+                rsgAttempts = 0;
+            }
+            try {
+                ssgAttempts = !properties.containsKey("ssgAttempts") ? 0 : Integer.parseInt(properties.getProperty("ssgAttempts"));
+            } catch (NumberFormatException e) {
+                ssgAttempts = 0;
+            }
+            structures = !properties.containsKey("structures") || Boolean.parseBoolean(properties.getProperty("structures"));
+            bonusChest = Boolean.parseBoolean(properties.getProperty("bonusChest"));
+        }
+    }
+
+    @Nullable
+    public static String getGeneratorTypeString(int generatorType) {
+        return switch (generatorType) {
+            case 0 -> "normal";
+            case 1 -> "flat";
+            case 2 -> "large_biomes";
+            case 3 -> "amplified";
+            case 4 -> "single_biome_surface";
+            default -> null;
+        };
     }
 }
